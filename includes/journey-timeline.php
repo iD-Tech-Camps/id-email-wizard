@@ -221,19 +221,31 @@ function idwiz_journey_monthly_engagement($campaignIds, $months)
 		$caseParams = [];
 		$bucket = idwiz_timeline_month_case('sent.startAt', $months, $caseParams);
 
+		// Semi-join rather than a join plus COUNT(DISTINCT): the question is
+		// "did this send get an open", not "how many opens did it get", so one
+		// probe of the events table's messageId index per send answers it and
+		// MySQL can stop at the first match. Joining every event row in and
+		// de-duplicating afterwards reads the same rows off disk many times
+		// over, which is what made this the slowest query on the tab. A
+		// messageId belongs to one send of one campaign, so matching on it
+		// alone is as tight as also filtering the event's own campaignId - and
+		// it lets the probe stay inside the messageId index. It also keeps the
+		// occasional event row that arrived with no campaignId of its own,
+		// which the campaignId filter used to drop.
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
-				"SELECT sent.campaignId AS campaignId, {$bucket} AS ym, COUNT(DISTINCT events.messageId) AS total
+				"SELECT sent.campaignId AS campaignId, {$bucket} AS ym, COUNT(*) AS total
 				 FROM (
 					SELECT messageId, campaignId, MIN(startAt) AS startAt
 					FROM {$sendsTable}
 					WHERE campaignId IN ({$idPlaceholders}) AND startAt >= %d AND startAt < %d
 					GROUP BY messageId, campaignId
 				 ) AS sent
-				 INNER JOIN {$eventsTable} AS events ON events.messageId = sent.messageId
-				 WHERE events.campaignId IN ({$idPlaceholders})
+				 WHERE EXISTS (
+					SELECT 1 FROM {$eventsTable} AS events WHERE events.messageId = sent.messageId
+				 )
 				 GROUP BY sent.campaignId, ym",
-				array_merge($caseParams, $campaignIds, [$rangeStart, $rangeEnd], $campaignIds)
+				array_merge($caseParams, $campaignIds, [$rangeStart, $rangeEnd])
 			),
 			ARRAY_A
 		);
@@ -280,7 +292,13 @@ function idwiz_journey_monthly_purchases($campaignIds, $months)
 		'fields' => ['campaignId', 'purchaseDate', 'total'],
 	]);
 
-	if (!is_array($purchases)) {
+	// build_idwiz_query() reports a bad argument by returning ['error' => ...]
+	// rather than failing, and iterating that as if it were rows silently zeroes
+	// the journey's revenue.
+	if (!is_array($purchases) || isset($purchases['error'])) {
+		if (is_array($purchases)) {
+			error_log('idwiz_journey_monthly_purchases query error: ' . $purchases['error']);
+		}
 		return $totals;
 	}
 
@@ -585,7 +603,17 @@ function get_idwiz_journey_timeline($journeyId, $forceRefresh = false)
 				$totals[$monthKey][$metricKey] += $value;
 			}
 
-			$activeMonthKeys[$monthKey] = true;
+			// A month can end up here with nothing in it: a $0 purchase, or a
+			// purchase whose campaign is in this journey but which landed in a
+			// month the journey did not send in, still creates a bucket. Shipping
+			// those adds months - and whole fiscal years - that have no reading
+			// on any metric, so drop the ones that are empty on every count.
+			if (
+				$counts['sends'] > 0 || $counts['purchases'] > 0
+				|| $counts['revenue'] != 0 || $counts['gaRevenue'] != 0
+			) {
+				$activeMonthKeys[$monthKey] = true;
+			}
 		}
 	}
 
@@ -594,6 +622,8 @@ function get_idwiz_journey_timeline($journeyId, $forceRefresh = false)
 	$months = array_values(array_filter($months, function ($month) use ($activeMonthKeys) {
 		return isset($activeMonthKeys[$month['key']]);
 	}));
+
+	$totals = array_intersect_key($totals, $activeMonthKeys);
 
 	$fiscalYears = array_values(array_unique(array_column($months, 'fiscalYear')));
 	sort($fiscalYears);

@@ -358,6 +358,39 @@ jQuery(document).ready(function ($) {
 		return first === last ? first : first + '–' + last;
 	}
 
+	/**
+	 * The two fiscal years to open on: the most recent two the journey actually
+	 * sent in.
+	 *
+	 * A purchase can be attributed to a campaign long after its last send, and
+	 * that lands a revenue-only month - and with it a whole fiscal year - on the
+	 * timeline with no sends behind it. Opening on such a year leaves every rate
+	 * and volume metric null, so the tiles, chart and table all read as empty on
+	 * a journey with years of data. Years without sends stay selectable; they
+	 * are just never the default.
+	 */
+	function defaultYears(payload) {
+		var seen = {};
+		var years = [];
+
+		payload.months.forEach(function (month) {
+			var counts = payload.totals[month.key];
+			if (!counts || !counts.sends || seen[month.fiscalYear]) {
+				return;
+			}
+			seen[month.fiscalYear] = true;
+			years.push(month.fiscalYear);
+		});
+
+		if (!years.length) {
+			years = payload.fiscalYears.slice();
+		}
+
+		years.sort(function (a, b) { return a - b; });
+
+		return years.slice(-2);
+	}
+
 	function primaryYear() {
 		if (!state.selectedYears.length) {
 			return null;
@@ -967,10 +1000,9 @@ jQuery(document).ready(function ($) {
 
 		// Open on the current fiscal year plus the one before it - the comparison
 		// people come to this tab for - falling back to the two most recent years
-		// with data on a journey that stopped sending a while ago.
+		// with sends on a journey that stopped sending a while ago.
 		if (!state.selectedYears.length) {
-			var years = payload.fiscalYears;
-			state.selectedYears = years.slice(-2);
+			state.selectedYears = defaultYears(payload);
 		}
 
 		els.status.hidden = true;
