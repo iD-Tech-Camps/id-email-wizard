@@ -167,11 +167,107 @@ function idwiz_timeline_month_case($column, $months, &$params)
  * send the open arrived. Counting events by their own timestamps instead lets a
  * month report opens against sends it never made.
  *
- * @param array $campaignIds Campaign ids, connected campaigns included.
- * @param array $months      Month buckets.
+ * Aggregated one fiscal year at a time, with the years that have ended cached
+ * for a day. A journey with six years of history is the case that takes long
+ * enough to be killed mid-flight, and this way the second attempt only has the
+ * current year left to read.
+ *
+ * @param array       $campaignIds  Campaign ids, connected campaigns included.
+ * @param array       $months       Month buckets.
+ * @param string|null $error        Set to the database error if a query fails.
+ * @param bool        $forceRefresh Re-read the closed years instead of caching.
  * @return array campaignId => monthKey => [metric => count]
  */
-function idwiz_journey_monthly_engagement($campaignIds, $months)
+function idwiz_journey_monthly_engagement($campaignIds, $months, &$error = null, $forceRefresh = false)
+{
+	$counts = [];
+
+	if (empty($campaignIds) || empty($months)) {
+		return $counts;
+	}
+
+	// One statement per fiscal year rather than one over the whole history. The
+	// work is the same either way, but each statement now reads a twelfth of the
+	// sends a six-year journey has instead of all of them, which keeps it inside
+	// whatever per-statement budget the database is enforcing. A single query
+	// spanning six years is the one that gets killed, and a killed query here
+	// used to return an empty result that read as "zero opens".
+	$byYear = [];
+	foreach ($months as $month) {
+		$byYear[$month['fiscalYear']][] = $month;
+	}
+
+	// A fiscal year that has ended still moves a little - a late open counts
+	// against a send from months ago - but not enough to re-read on every page
+	// load. The current year is left uncached; the payload transient covers it.
+	$currentFiscalYear = idwiz_timeline_fiscal_year((int) date('Y'), (int) date('n'));
+
+	foreach ($byYear as $fiscalYear => $yearMonths) {
+		$cacheKey = 'idwiz_jte_' . md5(wp_json_encode([
+			'v' => 1,
+			'campaigns' => $campaignIds,
+			'fiscalYear' => $fiscalYear,
+		]));
+		$isClosedYear = $fiscalYear < $currentFiscalYear;
+
+		if ($isClosedYear && !$forceRefresh) {
+			$cached = get_transient($cacheKey);
+			if (is_array($cached)) {
+				$counts = idwiz_journey_merge_engagement($counts, $cached);
+				continue;
+			}
+		}
+
+		$chunkError = null;
+		$yearCounts = idwiz_journey_monthly_engagement_chunk($campaignIds, $yearMonths, $chunkError);
+
+		if ($chunkError) {
+			// Returning what we have would ship a payload that reads as real
+			// zeros for every year we never got to. Say what happened instead.
+			$error = $chunkError;
+			return $counts;
+		}
+
+		if ($isClosedYear) {
+			set_transient($cacheKey, $yearCounts, DAY_IN_SECONDS);
+		}
+
+		$counts = idwiz_journey_merge_engagement($counts, $yearCounts);
+	}
+
+	return $counts;
+}
+
+/**
+ * Fold one chunk's counts into the running set.
+ *
+ * Chunks partition the window by fiscal year, so no two of them carry the same
+ * campaign and month.
+ *
+ * @param array $counts campaignId => monthKey => [metric => count]
+ * @param array $chunk  Same shape.
+ * @return array
+ */
+function idwiz_journey_merge_engagement($counts, $chunk)
+{
+	foreach ($chunk as $campaignId => $byMonth) {
+		foreach ($byMonth as $monthKey => $values) {
+			$counts[$campaignId][$monthKey] = $values;
+		}
+	}
+
+	return $counts;
+}
+
+/**
+ * Engagement counts for one slice of the window.
+ *
+ * @param array       $campaignIds Campaign ids, connected campaigns included.
+ * @param array       $months      Month buckets, all inside one fiscal year.
+ * @param string|null $error       Set to the database error if a query fails.
+ * @return array campaignId => monthKey => [metric => count]
+ */
+function idwiz_journey_monthly_engagement_chunk($campaignIds, $months, &$error = null)
 {
 	global $wpdb;
 
@@ -199,6 +295,16 @@ function idwiz_journey_monthly_engagement($campaignIds, $months)
 		),
 		ARRAY_A
 	);
+
+	// wpdb reports a failed query as an empty result set, which is
+	// indistinguishable from "this campaign sent nothing" unless last_error is
+	// read straight after the call. A statement killed by a timeout used to
+	// land on the page as a real zero.
+	if ($wpdb->last_error) {
+		$error = $wpdb->last_error;
+		error_log('idwiz_journey_monthly_engagement sends query failed: ' . $error);
+		return $counts;
+	}
 
 	foreach ($sendRows ?: [] as $row) {
 		if (empty($row['ym'])) {
@@ -250,16 +356,18 @@ function idwiz_journey_monthly_engagement($campaignIds, $months)
 			ARRAY_A
 		);
 
+		if ($wpdb->last_error) {
+			$error = $wpdb->last_error;
+			error_log("idwiz_journey_monthly_engagement {$metricKey} query failed: " . $error);
+			return $counts;
+		}
+
 		foreach ($rows ?: [] as $row) {
 			if (empty($row['ym'])) {
 				continue;
 			}
 			$counts[(int) $row['campaignId']][$row['ym']][$metricKey] = (int) $row['total'];
 		}
-	}
-
-	if ($wpdb->last_error) {
-		error_log('idwiz_journey_monthly_engagement SQL error: ' . $wpdb->last_error);
 	}
 
 	return $counts;
@@ -468,11 +576,12 @@ function idwiz_timeline_empty_counts()
  * The whole timeline payload for a journey: every month it has sent in, per
  * campaign and rolled up, ready for the browser to slice by metric and year.
  *
- * @param int  $journeyId
- * @param bool $forceRefresh Skip the cached copy and re-aggregate.
+ * @param int         $journeyId
+ * @param bool        $forceRefresh Skip the cached copy and re-aggregate.
+ * @param string|null $error        Set to the database error if aggregation fails.
  * @return array|false
  */
-function get_idwiz_journey_timeline($journeyId, $forceRefresh = false)
+function get_idwiz_journey_timeline($journeyId, $forceRefresh = false, &$error = null)
 {
 	$journeyId = (int) $journeyId;
 
@@ -543,7 +652,14 @@ function get_idwiz_journey_timeline($journeyId, $forceRefresh = false)
 		$months = array_slice($months, -IDWIZ_TIMELINE_MAX_MONTHS);
 	}
 
-	$engagement = idwiz_journey_monthly_engagement($ids['allIds'], $months);
+	$engagement = idwiz_journey_monthly_engagement($ids['allIds'], $months, $error, $forceRefresh);
+
+	// Half an aggregation is worse than none: it looks like a journey whose
+	// engagement collapsed. Bail before anything gets cached or drawn.
+	if ($error) {
+		return false;
+	}
+
 	$purchases = idwiz_journey_monthly_purchases($ids['allIds'], $months);
 	$gaRevenue = idwiz_journey_monthly_ga_revenue($ids['allIds'], $months);
 
@@ -701,10 +817,15 @@ add_action('wp_ajax_idwiz_journey_timeline', function () {
 		wp_send_json_error('Missing journey ID');
 	}
 
-	$timeline = get_idwiz_journey_timeline($journeyId, !empty($_POST['refresh']));
+	$error = null;
+	$timeline = get_idwiz_journey_timeline($journeyId, !empty($_POST['refresh']), $error);
 
 	if (!$timeline) {
-		wp_send_json_error('Journey not found');
+		// A database error and a missing journey both used to read "Journey not
+		// found", which sent anyone debugging this in the wrong direction.
+		wp_send_json_error($error
+			? 'The journey aggregation failed: ' . $error
+			: 'Journey not found');
 	}
 
 	wp_send_json_success($timeline);
