@@ -55,6 +55,30 @@
 	margin-left: auto;
 }
 
+/* Sits with the buttons but reads as a setting, not an action: no button
+   chrome, and the label wraps to two lines rather than pushing them off the
+   row on a narrow window. */
+.journey-timeline .jt-retain {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	max-width: 190px;
+	margin-right: 4px;
+	font-size: 0.75rem;
+	line-height: 1.25;
+	color: var(--jt-ink-soft);
+	cursor: pointer;
+}
+
+.journey-timeline .jt-retain input {
+	flex: 0 0 auto;
+	margin: 0;
+}
+
+.journey-timeline .jt-retain input:disabled {
+	cursor: progress;
+}
+
 .journey-timeline .jt-control-label {
 	font-size: 0.75rem;
 	font-weight: 600;
@@ -127,6 +151,15 @@
 	background: var(--jt-surface);
 	border: 1px solid var(--jt-line);
 	border-radius: 5px;
+}
+
+/* The cold-cache message is a sentence, not a word: keep it on a readable
+   measure instead of letting it run the full width of the page. */
+.journey-timeline .jt-status-message {
+	display: inline-block;
+	max-width: 52ch;
+	text-align: center;
+	text-wrap: pretty;
 }
 
 .journey-timeline .jt-error {

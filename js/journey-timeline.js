@@ -142,7 +142,8 @@ jQuery(document).ready(function ($) {
 		campaignTable: document.getElementById('jt-campaign-table'),
 		footnote: document.getElementById('jt-footnote'),
 		refresh: document.getElementById('jt-refresh'),
-		exportBtn: document.getElementById('jt-export')
+		exportBtn: document.getElementById('jt-export'),
+		retain: document.getElementById('jt-retain')
 	};
 
 	/* -------------------------------------------------------------- helpers */
@@ -953,14 +954,40 @@ jQuery(document).ready(function ($) {
 	/* ----------------------------------------------------------------- load */
 
 	function showStatus(html) {
-		els.status.innerHTML = html;
+		els.status.innerHTML = '<div class="jt-status-message">' + html + '</div>';
 		els.status.hidden = false;
 		els.body.hidden = true;
 	}
 
+	/**
+	 * What to say while the payload is in flight.
+	 *
+	 * A warm journey is back in milliseconds, so a bare spinner is right. A cold
+	 * one has to read every month it has ever sent in, which is the better part
+	 * of a minute - and a spinner that sits there that long reads as broken, so
+	 * say what is happening instead. The server settles warm-vs-cold when the
+	 * page is built, because asking is the slow part.
+	 */
+	function loadingMessage(forceRefresh) {
+		if (forceRefresh) {
+			return 'Re-aggregating journey performance&hellip; this reads every month again, so give it a minute.';
+		}
+
+		var cacheState = root.getAttribute('data-cache-state');
+
+		if (cacheState === 'cold') {
+			return 'No one\'s been here in a while, please wait while we collect and cache the journey data&hellip;';
+		}
+
+		if (cacheState === 'topping') {
+			return 'Catching up on this month&rsquo;s sends&hellip;';
+		}
+
+		return 'Loading journey performance&hellip;';
+	}
+
 	function load(forceRefresh) {
-		showStatus('<i class="fa-solid fa-spinner fa-spin"></i>&nbsp;&nbsp;'
-			+ (forceRefresh ? 'Re-aggregating journey performance&hellip;' : 'Loading journey performance&hellip;'));
+		showStatus('<i class="fa-solid fa-spinner fa-spin"></i>&nbsp;&nbsp;' + loadingMessage(forceRefresh));
 
 		$.ajax({
 			url: idAjax_journey_timeline.ajaxurl,
@@ -991,6 +1018,10 @@ jQuery(document).ready(function ($) {
 
 	function applyPayload(payload) {
 		state.data = payload;
+
+		// Whatever we just read is cached now, so the next load in this session
+		// is a warm one and should not be announced as a cold one.
+		root.setAttribute('data-cache-state', 'warm');
 
 		if (!payload.months.length) {
 			showStatus('<p class="jt-empty-state">This journey has no sends on record yet, so there is nothing to chart. '
@@ -1029,6 +1060,31 @@ jQuery(document).ready(function ($) {
 	});
 
 	els.exportBtn.addEventListener('click', exportCsv);
+
+	if (els.retain) {
+		els.retain.addEventListener('change', function () {
+			var wanted = els.retain.checked;
+
+			els.retain.disabled = true;
+
+			$.ajax({
+				url: idAjax_journey_timeline.ajaxurl,
+				type: 'POST',
+				data: {
+					action: 'idwiz_journey_timeline_retain',
+					security: idAjax_journey_timeline.nonce,
+					journeyId: root.getAttribute('data-journey-id'),
+					retain: wanted ? 1 : 0
+				}
+			}).fail(function () {
+				// Put the box back where it was rather than leaving it showing a
+				// preference the server never recorded.
+				els.retain.checked = !wanted;
+			}).always(function () {
+				els.retain.disabled = false;
+			});
+		});
+	}
 
 	$(document).on('click', '.jt-retry', function () {
 		load(false);

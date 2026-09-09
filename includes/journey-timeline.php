@@ -60,8 +60,13 @@ if (!defined('IDWIZ_TIMELINE_SETTLING_TTL')) {
 	define('IDWIZ_TIMELINE_SETTLING_TTL', 12 * HOUR_IN_SECONDS);
 }
 
+// A month that has been settled this long cannot change without a sync
+// backfilling it, so once a visit has paid to read it, that reading is kept for
+// a month. Visiting a journey is what fills this in, which is why a journey
+// anyone has looked at recently stays fast whether or not it is on the warm
+// list. The Refresh button re-reads it regardless.
 if (!defined('IDWIZ_TIMELINE_SETTLED_TTL')) {
-	define('IDWIZ_TIMELINE_SETTLED_TTL', WEEK_IN_SECONDS);
+	define('IDWIZ_TIMELINE_SETTLED_TTL', MONTH_IN_SECONDS);
 }
 
 /**
@@ -982,4 +987,221 @@ add_action('wp_ajax_idwiz_journey_timeline', function () {
 	}
 
 	wp_send_json_success($timeline);
+});
+
+/* -------------------------------------------------------------------------
+ * Keeping a journey warm
+ *
+ * A visit fills the month caches and they hold for up to a month, so any
+ * journey someone has looked at recently loads fast. What a visit cannot do is
+ * keep the month currently being sent in fresh - that entry expires every
+ * fifteen minutes, and the next visitor pays a few seconds to re-read it.
+ *
+ * Ticking "retain this data" puts the journey on a list that a cron re-reads on
+ * that same cadence, so the tab is warm before anyone opens it. The list is
+ * site-wide rather than per-user, but records who asked: revenue depends on the
+ * viewer's attribution settings, so the warmer has to read it as each of them.
+ * ---------------------------------------------------------------------- */
+
+if (!defined('IDWIZ_TIMELINE_RETAINED_OPTION')) {
+	define('IDWIZ_TIMELINE_RETAINED_OPTION', 'idwiz_timeline_retained_journeys');
+}
+
+/**
+ * The journeys on the warm list: journeyId => [userId => true].
+ *
+ * @return array
+ */
+function idwiz_timeline_retained_journeys()
+{
+	$retained = get_option(IDWIZ_TIMELINE_RETAINED_OPTION, []);
+
+	return is_array($retained) ? $retained : [];
+}
+
+/**
+ * Whether a user has asked for this journey to be kept warm.
+ *
+ * @param int $journeyId
+ * @param int $userId
+ * @return bool
+ */
+function idwiz_timeline_journey_is_retained($journeyId, $userId)
+{
+	$retained = idwiz_timeline_retained_journeys();
+
+	return !empty($retained[(int) $journeyId][(int) $userId]);
+}
+
+/**
+ * Add or remove a journey from the warm list for one user.
+ *
+ * @param int  $journeyId
+ * @param int  $userId
+ * @param bool $retain
+ * @return bool Whether the journey is on the list for this user afterwards.
+ */
+function idwiz_timeline_set_journey_retained($journeyId, $userId, $retain)
+{
+	$journeyId = (int) $journeyId;
+	$userId = (int) $userId;
+	$retained = idwiz_timeline_retained_journeys();
+
+	if ($retain) {
+		$retained[$journeyId][$userId] = true;
+	} else {
+		unset($retained[$journeyId][$userId]);
+
+		// Drop the journey entirely once nobody wants it warmed, rather than
+		// leaving an empty entry for the cron to walk over.
+		if (empty($retained[$journeyId])) {
+			unset($retained[$journeyId]);
+		}
+	}
+
+	update_option(IDWIZ_TIMELINE_RETAINED_OPTION, $retained, false);
+
+	return (bool) $retain;
+}
+
+/**
+ * How much of this journey's timeline is already cached.
+ *
+ * Read before the page paints so the tab can say "this is going to take a
+ * while" instead of showing a spinner that sits there for a minute. Asking the
+ * aggregator would mean doing the work, so this reads two month entries and
+ * infers the rest:
+ *
+ *  - 'warm'    the month being sent in is cached, so the payload assembles from
+ *              cache and the tab paints immediately.
+ *  - 'topping' last month is cached but the live one has expired: one month to
+ *              re-read, a few seconds.
+ *  - 'cold'    neither, so every month this journey has ever sent in has to be
+ *              read. This is the minute-long case worth warning about.
+ *
+ * @param int $journeyId
+ * @return string
+ */
+function idwiz_journey_timeline_cache_state($journeyId)
+{
+	$journeyId = (int) $journeyId;
+
+	if (!$journeyId) {
+		return 'cold';
+	}
+
+	date_default_timezone_set('America/Los_Angeles');
+
+	$campaigns = get_idwiz_campaigns([
+		'workflowId' => $journeyId,
+		'fields' => ['id', 'connectedCampaigns'],
+	]);
+
+	if (!is_array($campaigns) || empty($campaigns)) {
+		// Nothing to aggregate, so nothing to wait for.
+		return 'warm';
+	}
+
+	$ids = idwiz_journey_timeline_campaign_ids($campaigns);
+	$keyParts = ['source' => 'engagement', 'campaigns' => $ids['allIds']];
+
+	$thisMonth = idwiz_timeline_month_range(date('Y-m'), date('Y-m'));
+	if (empty($thisMonth)) {
+		return 'warm';
+	}
+
+	if (is_array(get_transient(idwiz_timeline_month_cache_key($keyParts, $thisMonth[0])))) {
+		return 'warm';
+	}
+
+	// A month a visit has already paid for is cached even when it held nothing,
+	// so last month's entry existing means this journey's history is in hand
+	// and only the live month needs re-reading.
+	$lastMonth = idwiz_timeline_month_range(date('Y-m', strtotime('first day of last month')), date('Y-m', strtotime('first day of last month')));
+
+	if (!empty($lastMonth) && is_array(get_transient(idwiz_timeline_month_cache_key($keyParts, $lastMonth[0])))) {
+		return 'topping';
+	}
+
+	return 'cold';
+}
+
+/**
+ * Toggle the warm list from the Timeline tab.
+ */
+add_action('wp_ajax_idwiz_journey_timeline_retain', function () {
+	check_ajax_referer('journey-timeline', 'security');
+
+	if (!is_user_logged_in()) {
+		wp_send_json_error('Not authorized');
+	}
+
+	$journeyId = isset($_POST['journeyId']) ? (int) $_POST['journeyId'] : 0;
+	if (!$journeyId) {
+		wp_send_json_error('Missing journey ID');
+	}
+
+	$retain = !empty($_POST['retain']);
+	idwiz_timeline_set_journey_retained($journeyId, get_current_user_id(), $retain);
+
+	wp_send_json_success(['retained' => $retain]);
+});
+
+/**
+ * Re-read whatever has expired on the warm list.
+ *
+ * Journeys whose months are all still cached cost nothing here: the payload
+ * transient answers and the run moves on.
+ */
+add_action('idwiz_timeline_warm_retained', 'idwiz_timeline_warm_retained_journeys');
+function idwiz_timeline_warm_retained_journeys()
+{
+	$retained = idwiz_timeline_retained_journeys();
+
+	if (empty($retained)) {
+		return;
+	}
+
+	$originalUserId = get_current_user_id();
+
+	foreach ($retained as $journeyId => $userIds) {
+		if (empty($userIds) || !is_array($userIds)) {
+			continue;
+		}
+
+		// Engagement is the same for everyone and is read on the first pass;
+		// what the later passes add is each viewer's revenue attribution.
+		foreach (array_keys($userIds) as $userId) {
+			wp_set_current_user((int) $userId);
+
+			$error = null;
+			get_idwiz_journey_timeline((int) $journeyId, false, $error);
+
+			if ($error) {
+				error_log("idwiz_timeline_warm_retained: journey {$journeyId} failed for user {$userId}: {$error}");
+				break;
+			}
+		}
+	}
+
+	wp_set_current_user($originalUserId);
+}
+
+// The live month's entry expires every fifteen minutes, so warming on the same
+// cadence is what keeps a retained journey from ever being read on demand.
+add_filter('cron_schedules', function ($schedules) {
+	if (!isset($schedules['every_fifteen_minutes'])) {
+		$schedules['every_fifteen_minutes'] = [
+			'interval' => 15 * MINUTE_IN_SECONDS,
+			'display' => __('Every 15 Minutes'),
+		];
+	}
+
+	return $schedules;
+});
+
+add_action('wp_loaded', function () {
+	if (!wp_next_scheduled('idwiz_timeline_warm_retained')) {
+		wp_schedule_event(time() + MINUTE_IN_SECONDS, 'every_fifteen_minutes', 'idwiz_timeline_warm_retained');
+	}
 });

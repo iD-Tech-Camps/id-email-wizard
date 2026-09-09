@@ -160,8 +160,15 @@ if ($journeyId && get_idwiz_journey($journeyId)) {
 				// get_idwiz_journey_timeline() and fetched over AJAX, so the page
 				// paints immediately and switching metric or fiscal year is a
 				// client-side re-render rather than a full reload.
+				//
+				// Whether the aggregation is already cached is settled here rather
+				// than in the browser: the request that would tell us is the one
+				// that takes a minute, and the point is to say so before it starts.
+				$timelineCacheState = idwiz_journey_timeline_cache_state($journeyId);
+				$timelineRetained = idwiz_timeline_journey_is_retained($journeyId, get_current_user_id());
 				?>
-				<div class="journey-timeline" id="journey-timeline" data-journey-id="<?php echo (int) $journeyId; ?>">
+				<div class="journey-timeline" id="journey-timeline" data-journey-id="<?php echo (int) $journeyId; ?>"
+					data-cache-state="<?php echo esc_attr($timelineCacheState); ?>">
 					<div class="jt-controls">
 						<div class="jt-control">
 							<label class="jt-control-label" for="jt-metric">Metric</label>
@@ -172,6 +179,11 @@ if ($journeyId && get_idwiz_journey($journeyId)) {
 							<div class="jt-chips" id="jt-year-chips"></div>
 						</div>
 						<div class="jt-control jt-control-actions">
+							<label class="jt-retain" for="jt-retain"
+								title="Re-read this journey's most recent month on a schedule, so the tab is already warm when you open it">
+								<input type="checkbox" id="jt-retain" <?php checked($timelineRetained); ?> />
+								<span>Retain this data for faster page loads</span>
+							</label>
 							<button type="button" class="wiz-button gray" id="jt-export" title="Download the table below as CSV">
 								<i class="fa-solid fa-file-csv"></i>&nbsp;&nbsp;CSV
 							</button>
