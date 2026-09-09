@@ -1,0 +1,442 @@
+/**
+ * Journey Timeline tab.
+ *
+ * Layout is a single column of panels: controls, KPI tiles, chart, month-by-month
+ * table, per-campaign breakdown. Borders and radii follow the plugin's existing
+ * card language (1px #eee, 5px radius) rather than the heavier inset shadow, so
+ * the numbers stay the loudest thing on the page.
+ */
+
+.journey-timeline {
+	--jt-ink: #1d2327;
+	--jt-ink-soft: #50575e;
+	--jt-ink-muted: #8c8f94;
+	--jt-line: #e6e8eb;
+	--jt-surface: #ffffff;
+	--jt-surface-alt: #f7f8f9;
+	--jt-good: #1e7b46;
+	--jt-bad: #b32d2e;
+
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	margin-top: 16px;
+	color: var(--jt-ink);
+}
+
+/* ------------------------------------------------------------------ controls */
+
+.journey-timeline .jt-controls {
+	display: flex;
+	align-items: flex-end;
+	flex-wrap: wrap;
+	gap: 20px;
+	padding: 14px 16px;
+	background: var(--jt-surface);
+	border: 1px solid var(--jt-line);
+	border-radius: 5px;
+}
+
+.journey-timeline .jt-control {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.journey-timeline .jt-control-years {
+	flex: 1 1 320px;
+	min-width: 0;
+}
+
+.journey-timeline .jt-control-actions {
+	flex-direction: row;
+	align-items: center;
+	gap: 8px;
+	margin-left: auto;
+}
+
+.journey-timeline .jt-control-label {
+	font-size: 0.75rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--jt-ink-muted);
+}
+
+.journey-timeline .jt-select {
+	min-width: 190px;
+	padding: 7px 10px;
+	font-size: 0.95rem;
+	color: var(--jt-ink);
+	background: var(--jt-surface);
+	border: 1px solid #c3c4c7;
+	border-radius: 4px;
+}
+
+.journey-timeline .jt-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.journey-timeline .jt-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	padding: 6px 12px;
+	font-size: 0.9rem;
+	line-height: 1;
+	color: var(--jt-ink-soft);
+	background: var(--jt-surface);
+	border: 1px solid #c3c4c7;
+	border-radius: 999px;
+	cursor: pointer;
+	transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.journey-timeline .jt-chip:hover {
+	background: var(--jt-surface-alt);
+}
+
+.journey-timeline .jt-chip.on {
+	color: var(--jt-ink);
+	background: var(--jt-surface-alt);
+	border-color: var(--jt-ink-muted);
+	font-weight: 600;
+}
+
+/* Off years keep their color in the swatch but drain it, so the chip row reads
+   as a legend for the chart rather than as decoration. */
+.journey-timeline .jt-chip-swatch {
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	opacity: 0.3;
+}
+
+.journey-timeline .jt-chip.on .jt-chip-swatch {
+	opacity: 1;
+}
+
+/* --------------------------------------------------------------- status area */
+
+.journey-timeline .jt-status {
+	padding: 40px 16px;
+	text-align: center;
+	color: var(--jt-ink-soft);
+	background: var(--jt-surface);
+	border: 1px solid var(--jt-line);
+	border-radius: 5px;
+}
+
+.journey-timeline .jt-error {
+	color: var(--jt-bad);
+}
+
+.journey-timeline .jt-empty-state {
+	margin: 0;
+	color: var(--jt-ink-soft);
+}
+
+.journey-timeline .jt-body {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+/* A class that sets `display` outranks the UA rule behind the hidden attribute,
+   which would leave the empty panels on screen underneath the loader. */
+.journey-timeline [hidden] {
+	display: none !important;
+}
+
+/* ---------------------------------------------------------------- KPI tiles */
+
+.journey-timeline .jt-tiles-head {
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: 10px;
+	margin-bottom: 10px;
+}
+
+.journey-timeline .jt-tiles-title {
+	font-size: 1.05rem;
+	font-weight: 700;
+}
+
+.journey-timeline .jt-tiles-sub {
+	font-size: 0.85rem;
+	color: var(--jt-ink-muted);
+}
+
+.journey-timeline .jt-tile-grid {
+	display: grid;
+	grid-template-columns: repeat(5, minmax(0, 1fr));
+	gap: 12px;
+}
+
+.journey-timeline .jt-tile {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 14px 16px;
+	background: var(--jt-surface);
+	border: 1px solid var(--jt-line);
+	border-radius: 5px;
+}
+
+.journey-timeline .jt-tile-label {
+	font-size: 0.78rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--jt-ink-muted);
+}
+
+.journey-timeline .jt-tile-value {
+	font-size: 1.6rem;
+	font-weight: 700;
+	line-height: 1.2;
+	font-variant-numeric: tabular-nums;
+}
+
+.journey-timeline .jt-delta {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	font-size: 0.82rem;
+	font-weight: 600;
+	color: var(--jt-ink-muted);
+}
+
+.journey-timeline .jt-delta.good {
+	color: var(--jt-good);
+}
+
+.journey-timeline .jt-delta.bad {
+	color: var(--jt-bad);
+}
+
+.journey-timeline .jt-delta-arrow {
+	font-size: 0.7rem;
+}
+
+/* -------------------------------------------------------------------- panels */
+
+.journey-timeline .jt-panel {
+	padding: 18px 20px;
+	background: var(--jt-surface);
+	border: 1px solid var(--jt-line);
+	border-radius: 5px;
+}
+
+.journey-timeline .jt-panel-head {
+	margin-bottom: 14px;
+}
+
+.journey-timeline .jt-panel-head h2 {
+	margin: 0;
+	font-size: 1.05rem;
+	font-weight: 700;
+	color: var(--jt-ink);
+}
+
+.journey-timeline .jt-panel-sub {
+	margin: 4px 0 0;
+	font-size: 0.85rem;
+	color: var(--jt-ink-muted);
+}
+
+.journey-timeline .jt-chart-wrap {
+	position: relative;
+	height: 380px;
+}
+
+.journey-timeline .jt-legend {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px 20px;
+	margin-top: 14px;
+	padding-top: 12px;
+	border-top: 1px solid var(--jt-line);
+}
+
+.journey-timeline .jt-legend-item {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 7px;
+	font-size: 0.88rem;
+}
+
+.journey-timeline .jt-legend-swatch {
+	width: 10px;
+	height: 10px;
+	border-radius: 2px;
+	align-self: center;
+}
+
+.journey-timeline .jt-legend-label {
+	font-weight: 600;
+}
+
+.journey-timeline .jt-legend-value {
+	font-variant-numeric: tabular-nums;
+}
+
+.journey-timeline .jt-legend-months {
+	color: var(--jt-ink-muted);
+	font-size: 0.8rem;
+}
+
+/* -------------------------------------------------------------------- tables */
+
+.journey-timeline .jt-table-scroll {
+	overflow-x: auto;
+	max-width: 100%;
+}
+
+.journey-timeline .jt-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 0.9rem;
+}
+
+.journey-timeline .jt-table th,
+.journey-timeline .jt-table td {
+	padding: 8px 12px;
+	white-space: nowrap;
+	border-bottom: 1px solid var(--jt-line);
+}
+
+.journey-timeline .jt-table thead th {
+	font-size: 0.78rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+	color: var(--jt-ink-muted);
+	text-align: right;
+	border-bottom: 2px solid var(--jt-line);
+}
+
+.journey-timeline .jt-table tbody tr:hover td,
+.journey-timeline .jt-table tbody tr:hover th {
+	background: var(--jt-surface-alt);
+}
+
+/* The month (or campaign) name stays put while the year columns scroll. */
+.journey-timeline .jt-table .jt-sticky {
+	position: sticky;
+	left: 0;
+	z-index: 1;
+	text-align: left;
+	font-weight: 600;
+	background: var(--jt-surface);
+}
+
+.journey-timeline .jt-table tbody tr:hover .jt-sticky {
+	background: var(--jt-surface-alt);
+}
+
+.journey-timeline .jt-table .jt-num {
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+}
+
+.journey-timeline .jt-table .jt-empty {
+	color: var(--jt-ink-muted);
+}
+
+/* Change columns colour the number itself; the badge treatment used on the
+   tiles would turn the cell into an inline-flex box and collapse its column. */
+.journey-timeline .jt-table .jt-tone-good {
+	color: var(--jt-good);
+	font-weight: 600;
+}
+
+.journey-timeline .jt-table .jt-tone-bad {
+	color: var(--jt-bad);
+	font-weight: 600;
+}
+
+.journey-timeline .jt-table .jt-tone-flat {
+	color: var(--jt-ink-muted);
+}
+
+.journey-timeline .jt-table tfoot th,
+.journey-timeline .jt-table tfoot td {
+	font-weight: 700;
+	background: var(--jt-surface-alt);
+	border-top: 2px solid var(--jt-line);
+	border-bottom: 0;
+}
+
+.journey-timeline .jt-table .jt-year-total {
+	font-weight: 700;
+	border-left: 1px solid var(--jt-line);
+}
+
+/* ------------------------------------------------------- campaign breakdown */
+
+.journey-timeline .jt-campaigns > summary {
+	cursor: pointer;
+	list-style: none;
+}
+
+.journey-timeline .jt-campaigns > summary::-webkit-details-marker {
+	display: none;
+}
+
+.journey-timeline .jt-campaigns > summary h2::before {
+	content: "\25B8";
+	display: inline-block;
+	margin-right: 8px;
+	color: var(--jt-ink-muted);
+	transition: transform 0.15s ease;
+}
+
+.journey-timeline .jt-campaigns[open] > summary h2::before {
+	transform: rotate(90deg);
+}
+
+.journey-timeline .jt-footnote {
+	margin: 0;
+	font-size: 0.8rem;
+	line-height: 1.5;
+	color: var(--jt-ink-muted);
+}
+
+/* --------------------------------------------------------------- responsive */
+
+@media (max-width: 1200px) {
+	.journey-timeline .jt-tile-grid {
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+	}
+}
+
+@media (max-width: 768px) {
+	.journey-timeline .jt-controls {
+		align-items: stretch;
+	}
+
+	.journey-timeline .jt-control-actions {
+		margin-left: 0;
+	}
+
+	.journey-timeline .jt-select {
+		width: 100%;
+		min-width: 0;
+	}
+
+	.journey-timeline .jt-tile-grid {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.journey-timeline .jt-chart-wrap {
+		height: 300px;
+	}
+
+	.journey-timeline .jt-tile-value {
+		font-size: 1.35rem;
+	}
+}

@@ -153,190 +153,74 @@ if ($journeyId && get_idwiz_journey($journeyId)) {
 				</div>
 			<?php } ?>
 			
-			<?php if (isset($_GET['view']) && $_GET['view'] == 'Timeline') { ?>
+			<?php if ($activeTab == 'Timeline') { ?>
 				<?php
-				$months = ['November', 'December', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October'];
-				
-				// Generate fiscal years dynamically based on current year
-				$currentYear = (int)date('Y');
-				$fiscalYears = [];
-				for ($year = 2021; $year <= $currentYear + 1; $year++) {
-					$fiscalYears[] = (string)$year;
-				}
-				
-				$metrics = ['Open Rate', 'CTR', 'CTO', 'CVR', 'Revenue'];
-
-				$selectedMetric = $_GET['metric'] ?? 'Open Rate';
-				$selectedYears = $_GET['years'] ?? [date('Y')];
-				$selectedMonths = $_GET['months'] ?? $months;
-
-				// Ensure $selectedYears and $selectedMonths are arrays
-				$selectedYears = is_array($selectedYears) ? $selectedYears : [$selectedYears];
-				$selectedMonths = is_array($selectedMonths) ? $selectedMonths : [$selectedMonths];
+				// Everything below is a shell. The months, metrics and campaign rows
+				// are aggregated in a handful of grouped queries by
+				// get_idwiz_journey_timeline() and fetched over AJAX, so the page
+				// paints immediately and switching metric or fiscal year is a
+				// client-side re-render rather than a full reload.
 				?>
-
-				<div class="wizcampaign-section inset" id="journey-timeline-controls">
-					<div class="journey-timeline-control-set">
-						<select name="metric">
-							<?php
-							foreach ($metrics as $metric) {
-								$selected = ($metric === $selectedMetric) ? 'selected' : '';
-							?>
-								<option value="<?php echo $metric; ?>" <?php echo $selected; ?>><?php echo $metric; ?></option>
-							<?php
-							}
-							?>
-						</select>
-					</div>
-					<div class="journey-timeline-control-set">
-						<?php
-						foreach ($fiscalYears as $fiscalYear) {
-							$active = in_array($fiscalYear, $selectedYears) ? 'active green' : '';
-						?>
-							<button class="wiz-button <?php echo $active; ?>" data-fiscalyear="<?php echo $fiscalYear; ?>"><?php echo $fiscalYear; ?></button>
-						<?php
-						}
-						?>
-					</div>
-					<div class="journey-timeline-control-set">
-						<?php
-						foreach ($months as $month) {
-							$active = in_array($month, $selectedMonths) ? 'active green' : '';
-						?>
-							<button class="wiz-button <?php echo $active; ?>" data-month="<?php echo $month; ?>"><?php echo $month; ?></button>
-						<?php
-						}
-						?>
-					</div>
-				</div>
-				<div class="journey-timeline-wrapper">
-					<h2><?php echo $selectedMetric; ?> Timeline</h2>
-					<?php if (!empty($campaigns)): ?>
-						<table class="idemailwiz_table journey_campaigns_table">
-							<thead>
-								<tr>
-									<th>Fisc. Year</th>
-									<th>Month</th>
-									<?php foreach ($campaigns as $campaign) { ?>
-										<th><?php echo esc_html(is_array($campaign['name']) ? implode(', ', $campaign['name']) : $campaign['name']); ?></th>
-									<?php } ?>
-								</tr>
-							</thead>
-							<tbody>
-								<?php
-								$selectedMetric = $_GET['metric'] ?? 'Open Rate';
-								$selectedYears = $_GET['years'] ?? [date('Y')];
-								// de-dupe years
-								$selectedYears = array_unique($selectedYears);
-								$selectedMonths = $_GET['months'] ?? $months;
-								//de-dupe months
-								$selectedMonths = array_unique($selectedMonths);
-
-								$data = [];
-
-								foreach ($selectedYears as $year) {
-									foreach ($selectedMonths as $month) {
-										$rowData = [];
-										$rowData['year'] = $year;
-										$rowData['month'] = $month;
-
-										foreach ($campaigns as $campaign) {
-											$campaignId = $campaign['id'];
-											$monthIndex = array_search($month, $months);
-
-											if ($monthIndex < 2) {
-												$fiscalYear = $year - 1;
-												$monthNumber = $monthIndex + 11;
-											} else {
-												$fiscalYear = $year;
-												$monthNumber = $monthIndex - 1;
-											}
-
-											$monthNumber = str_pad($monthNumber, 2, '0', STR_PAD_LEFT);
-											$startDate = $fiscalYear . '-' . $monthNumber . '-01';
-											$endDate = date('Y-m-t', strtotime($startDate));
-
-											// Now using the optimized batch function
-											$campaignMetrics = get_triggered_campaign_metrics([$campaignId], $startDate, $endDate);
-											switch ($selectedMetric) {
-												case 'Open Rate':
-													$metricValue = $campaignMetrics['wizOpenRate'];
-													$rowData[$campaignId] = number_format($metricValue, 2) . '%';
-													break;
-												case 'CTR':
-													$metricValue = $campaignMetrics['wizCtr'];
-													$rowData[$campaignId] = number_format($metricValue, 2) . '%';
-													break;
-												case 'CTO':
-													$metricValue = $campaignMetrics['wizCto'];
-													$rowData[$campaignId] = number_format($metricValue, 2) . '%';
-													break;
-												case 'CVR':
-													$metricValue = $campaignMetrics['wizCvr'];
-													$rowData[$campaignId] = number_format($metricValue, 2) . '%';
-													break;
-												case 'Revenue':
-													$metricValue = $campaignMetrics['revenue'];
-													$rowData[$campaignId] = '$' . number_format($metricValue, 2);
-													break;
-											}
-										}
-
-										$data[] = $rowData;
-									}
-								}
-
-								// Sort by month first, then by year within each month
-								usort($data, function ($a, $b) use ($months) {
-									$monthComparison = array_search($a['month'], $months) - array_search($b['month'], $months);
-									if ($monthComparison != 0) {
-										return $monthComparison;
-									}
-									return $a['year'] - $b['year'];
-								});
-
-								// Define year colors for easy identification
-								$baseColors = [
-									'#e3f2fd', // Light blue
-									'#f3e5f5', // Light purple  
-									'#e8f5e8', // Light green
-									'#fff3e0', // Light orange
-									'#fce4ec', // Light pink
-									'#f1f8e9', // Light lime
-									'#e0f2f1', // Light teal
-									'#fdf7e3', // Light yellow
-									'#f0f4ff', // Light lavender
-									'#fff0f5', // Light rose
-								];
-								
-								$yearColors = [];
-								$colorIndex = 0;
-								for ($year = 2021; $year <= $currentYear + 5; $year++) {
-									$yearColors[(string)$year] = $baseColors[$colorIndex % count($baseColors)];
-									$colorIndex++;
-								}
-
-								foreach ($data as $rowData) {
-									$yearColor = $yearColors[$rowData['year']] ?? '#f8f9fa';
-									echo '<tr style="background-color: ' . $yearColor . ';">';
-									echo '<td><strong>' . $rowData['year'] . '</strong></td>';
-									echo '<td><strong>' . $rowData['month'] . '</strong></td>';
-
-									foreach ($campaigns as $campaign) {
-										$campaignId = $campaign['id'];
-										echo '<td>' . $rowData[$campaignId] . '</td>';
-									}
-
-									echo '</tr>';
-								}
-								?>
-							</tbody>
-						</table>
-					<?php else: ?>
-						<div class="wizcampaign-section inset">
-							<p>No campaigns found for timeline analysis.</p>
+				<div class="journey-timeline" id="journey-timeline" data-journey-id="<?php echo (int) $journeyId; ?>">
+					<div class="jt-controls">
+						<div class="jt-control">
+							<label class="jt-control-label" for="jt-metric">Metric</label>
+							<select id="jt-metric" class="jt-select"></select>
 						</div>
-					<?php endif; ?>
+						<div class="jt-control jt-control-years">
+							<span class="jt-control-label">Fiscal years</span>
+							<div class="jt-chips" id="jt-year-chips"></div>
+						</div>
+						<div class="jt-control jt-control-actions">
+							<button type="button" class="wiz-button gray" id="jt-export" title="Download the table below as CSV">
+								<i class="fa-solid fa-file-csv"></i>&nbsp;&nbsp;CSV
+							</button>
+							<button type="button" class="wiz-button gray" id="jt-refresh" title="Re-run the aggregation instead of using the cached copy">
+								<i class="fa-solid fa-arrows-rotate"></i>&nbsp;&nbsp;Refresh
+							</button>
+						</div>
+					</div>
+
+					<div class="jt-status" id="jt-status">
+						<i class="fa-solid fa-spinner fa-spin"></i>&nbsp;&nbsp;Loading journey performance&hellip;
+					</div>
+
+					<div class="jt-body" id="jt-body" hidden>
+						<div class="jt-tiles" id="jt-tiles"></div>
+
+						<section class="jt-panel">
+							<header class="jt-panel-head">
+								<h2 id="jt-chart-title">Performance over time</h2>
+								<p class="jt-panel-sub" id="jt-chart-sub"></p>
+							</header>
+							<div class="jt-chart-wrap">
+								<canvas id="jt-chart"></canvas>
+							</div>
+							<div class="jt-legend" id="jt-legend"></div>
+						</section>
+
+						<section class="jt-panel">
+							<header class="jt-panel-head">
+								<h2>Month by month</h2>
+								<p class="jt-panel-sub" id="jt-table-sub"></p>
+							</header>
+							<div class="jt-table-scroll">
+								<table class="jt-table" id="jt-table"></table>
+							</div>
+						</section>
+
+						<details class="jt-panel jt-campaigns" id="jt-campaigns">
+							<summary class="jt-panel-head">
+								<h2>By campaign</h2>
+								<p class="jt-panel-sub" id="jt-campaign-sub"></p>
+							</summary>
+							<div class="jt-table-scroll">
+								<table class="jt-table" id="jt-campaign-table"></table>
+							</div>
+						</details>
+
+						<p class="jt-footnote" id="jt-footnote"></p>
+					</div>
 				</div>
 			<?php } ?>
 		</div>
@@ -352,8 +236,10 @@ if ($journeyId && get_idwiz_journey($journeyId)) {
 // journeys.js depends on the export helpers in id-general.js.
 $journeysStyle = plugin_dir_path(__FILE__) . '../styles/journeys-archive.css';
 $journeysScript = plugin_dir_path(__FILE__) . '../js/journeys.js';
+$timelineStyle = plugin_dir_path(__FILE__) . '../styles/journey-timeline.css';
 
 wp_enqueue_style('journeys-archive', plugin_dir_url(__FILE__) . '../styles/journeys-archive.css', [], file_exists($journeysStyle) ? filemtime($journeysStyle) : '1.0.0');
+wp_enqueue_style('journey-timeline', plugin_dir_url(__FILE__) . '../styles/journey-timeline.css', ['journeys-archive'], file_exists($timelineStyle) ? filemtime($timelineStyle) : '1.0.0');
 wp_enqueue_script('journeys', plugin_dir_url(__FILE__) . '../js/journeys.js', ['jquery', 'id-general'], file_exists($journeysScript) ? filemtime($journeysScript) : '1.0.0', true);
 
 get_footer(); ?>

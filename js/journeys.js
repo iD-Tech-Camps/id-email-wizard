@@ -191,52 +191,10 @@ jQuery(document).ready(function ($) {
             });
     });
 
-    // Timeline controls
-    var fiscalYearButtons = $('.journey-timeline-control-set button[data-fiscalyear]');
-    var monthButtons = $('.journey-timeline-control-set button[data-month]');
-    var metricDropdown = $('.journey-timeline-control-set select[name="metric"]');
-
-    function updateTimelineData() {
-        var selectedYears = fiscalYearButtons.filter('.active').map(function() {
-            return $(this).data('fiscalyear');
-        }).get();
-
-        var selectedMonths = monthButtons.filter('.active').map(function() {
-            return $(this).data('month');
-        }).get();
-
-        var metric = metricDropdown.val();
-
-        var url = new URL(window.location.href);
-        url.searchParams.delete('years[]');
-        url.searchParams.delete('months[]');
-
-        selectedYears.forEach(function(year) {
-            url.searchParams.append('years[]', year);
-        });
-
-        selectedMonths.forEach(function(month) {
-            url.searchParams.append('months[]', month);
-        });
-
-        url.searchParams.set('metric', metric);
-
-        window.location.href = url.toString();
-    }
-
-    fiscalYearButtons.on('click', function() {
-        $(this).toggleClass('active');
-        updateTimelineData();
-    });
-
-    monthButtons.on('click', function() {
-        $(this).toggleClass('active');
-        updateTimelineData();
-    });
-
-    metricDropdown.on('change', function() {
-        updateTimelineData();
-    });
+    // The Timeline tab's controls live in js/journey-timeline.js. They used to
+    // reload the whole page on every metric, year or month click, which meant
+    // re-running the aggregation server-side each time; the tab now holds the
+    // journey's full history client-side and re-renders in place.
 
     // Handle collapsible sections
     $('.journey-description-section h3').on('click', function() {
