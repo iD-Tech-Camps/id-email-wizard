@@ -40,8 +40,28 @@ if (!defined('IDWIZ_TIMELINE_MAX_MONTHS')) {
 	define('IDWIZ_TIMELINE_MAX_MONTHS', 72);
 }
 
+// How long a month's counts are trusted, by how long ago that month ended. A
+// month the journey is still sending in changes by the hour; one that ended
+// last week only moves as late opens and attributed purchases trickle in; one
+// from two years ago does not move at all unless a sync backfills it, which is
+// what the Refresh button is for.
 if (!defined('IDWIZ_TIMELINE_CACHE_TTL')) {
 	define('IDWIZ_TIMELINE_CACHE_TTL', 15 * MINUTE_IN_SECONDS);
+}
+
+// A closed month can still gain engagement and revenue for as long as the
+// longest purchase attribution window the settings offer, so those months are
+// re-read a couple of times a day.
+if (!defined('IDWIZ_TIMELINE_SETTLING_DAYS')) {
+	define('IDWIZ_TIMELINE_SETTLING_DAYS', 90);
+}
+
+if (!defined('IDWIZ_TIMELINE_SETTLING_TTL')) {
+	define('IDWIZ_TIMELINE_SETTLING_TTL', 12 * HOUR_IN_SECONDS);
+}
+
+if (!defined('IDWIZ_TIMELINE_SETTLED_TTL')) {
+	define('IDWIZ_TIMELINE_SETTLED_TTL', WEEK_IN_SECONDS);
 }
 
 /**
@@ -167,10 +187,10 @@ function idwiz_timeline_month_case($column, $months, &$params)
  * send the open arrived. Counting events by their own timestamps instead lets a
  * month report opens against sends it never made.
  *
- * Aggregated one fiscal year at a time, with the years that have ended cached
- * for a day. A journey with six years of history is the case that takes long
- * enough to be killed mid-flight, and this way the second attempt only has the
- * current year left to read.
+ * Cached a month at a time, each month trusted for as long as that month is
+ * likely to stay still (see idwiz_timeline_month_cache_ttl). Misses are read a
+ * fiscal year at a time, so a cold journey costs a handful of statements rather
+ * than one per month, and no statement ever spans the whole history.
  *
  * @param array       $campaignIds  Campaign ids, connected campaigns included.
  * @param array       $months       Month buckets.
@@ -186,77 +206,163 @@ function idwiz_journey_monthly_engagement($campaignIds, $months, &$error = null,
 		return $counts;
 	}
 
-	// One statement per fiscal year rather than one over the whole history. The
-	// work is the same either way, but each statement now reads a twelfth of the
-	// sends a six-year journey has instead of all of them, which keeps it inside
-	// whatever per-statement budget the database is enforcing. A single query
-	// spanning six years is the one that gets killed, and a killed query here
-	// used to return an empty result that read as "zero opens".
-	$byYear = [];
+	return idwiz_timeline_cached_monthly(
+		$months,
+		['source' => 'engagement', 'campaigns' => $campaignIds],
+		function ($chunkMonths, &$chunkError) use ($campaignIds) {
+			return idwiz_journey_monthly_engagement_chunk($campaignIds, $chunkMonths, $chunkError);
+		},
+		$forceRefresh,
+		$error
+	);
+}
+
+/**
+ * Read a per-campaign-per-month series through the month-at-a-time cache.
+ *
+ * Everything the timeline needs has this shape, and all of it ages the same
+ * way: the month in progress moves constantly, a month that ended long ago
+ * does not move at all. So each month is cached on its own and a page load
+ * only re-reads the months whose entry has expired - in the steady state, just
+ * the one the journey is still sending in.
+ *
+ * @param array    $months       Month buckets.
+ * @param array    $keyParts     What the cached values depend on besides the month.
+ * @param callable $fetch        fn(array $months, string &$error): array - reads one slice.
+ * @param bool     $forceRefresh Ignore the cache and re-read every month.
+ * @param mixed    $error        Set to the failure reported by $fetch, if any.
+ * @return array campaignId => monthKey => value
+ */
+function idwiz_timeline_cached_monthly($months, $keyParts, callable $fetch, $forceRefresh = false, &$error = null)
+{
+	$series = [];
+	$missing = [];
+
 	foreach ($months as $month) {
-		$byYear[$month['fiscalYear']][] = $month;
-	}
-
-	// A fiscal year that has ended still moves a little - a late open counts
-	// against a send from months ago - but not enough to re-read on every page
-	// load. The current year is left uncached; the payload transient covers it.
-	$currentFiscalYear = idwiz_timeline_fiscal_year((int) date('Y'), (int) date('n'));
-
-	foreach ($byYear as $fiscalYear => $yearMonths) {
-		$cacheKey = 'idwiz_jte_' . md5(wp_json_encode([
-			'v' => 1,
-			'campaigns' => $campaignIds,
-			'fiscalYear' => $fiscalYear,
-		]));
-		$isClosedYear = $fiscalYear < $currentFiscalYear;
-
-		if ($isClosedYear && !$forceRefresh) {
-			$cached = get_transient($cacheKey);
+		if (!$forceRefresh) {
+			$cached = get_transient(idwiz_timeline_month_cache_key($keyParts, $month));
 			if (is_array($cached)) {
-				$counts = idwiz_journey_merge_engagement($counts, $cached);
+				$series = idwiz_timeline_merge_monthly($series, $cached);
 				continue;
 			}
 		}
 
+		$missing[] = $month;
+	}
+
+	if (empty($missing)) {
+		return $series;
+	}
+
+	// Read the misses a fiscal year at a time rather than a month at a time. A
+	// cold journey needs every month, and one statement per month would be
+	// hundreds of round trips; one statement per year is the same work in a
+	// handful. Still never one statement over the whole history - that is the
+	// one the database kills, and a killed query used to come back as an empty
+	// result set that read as "zero opens".
+	$byYear = [];
+	foreach ($missing as $month) {
+		$byYear[$month['fiscalYear']][] = $month;
+	}
+
+	foreach ($byYear as $yearMonths) {
 		$chunkError = null;
-		$yearCounts = idwiz_journey_monthly_engagement_chunk($campaignIds, $yearMonths, $chunkError);
+		$chunk = $fetch($yearMonths, $chunkError);
 
 		if ($chunkError) {
 			// Returning what we have would ship a payload that reads as real
 			// zeros for every year we never got to. Say what happened instead.
 			$error = $chunkError;
-			return $counts;
+			return $series;
 		}
 
-		if ($isClosedYear) {
-			set_transient($cacheKey, $yearCounts, DAY_IN_SECONDS);
+		// Split the slice back out per month before caching, so each month
+		// expires on its own schedule. A month with nothing in it is cached as
+		// an empty set - "we looked, there was nothing" is worth remembering
+		// too, and it is the common case on an idle journey.
+		foreach ($yearMonths as $month) {
+			$monthValues = [];
+			foreach ($chunk as $campaignId => $byMonth) {
+				if (isset($byMonth[$month['key']])) {
+					$monthValues[$campaignId][$month['key']] = $byMonth[$month['key']];
+				}
+			}
+
+			set_transient(
+				idwiz_timeline_month_cache_key($keyParts, $month),
+				$monthValues,
+				idwiz_timeline_month_cache_ttl($month)
+			);
 		}
 
-		$counts = idwiz_journey_merge_engagement($counts, $yearCounts);
+		$series = idwiz_timeline_merge_monthly($series, $chunk);
 	}
 
-	return $counts;
+	return $series;
 }
 
 /**
- * Fold one chunk's counts into the running set.
+ * The cache key for one month of one series.
  *
- * Chunks partition the window by fiscal year, so no two of them carry the same
+ * Keyed on the campaign set rather than the journey: a campaign joining or
+ * leaving changes what the month's numbers mean. Revenue additionally depends
+ * on the viewer's attribution settings, which is why the caller passes what it
+ * depends on rather than this deciding.
+ *
+ * @param array $keyParts What the cached values depend on besides the month.
+ * @param array $month    One month bucket.
+ * @return string
+ */
+function idwiz_timeline_month_cache_key($keyParts, $month)
+{
+	return 'idwiz_jtm_' . md5(wp_json_encode([
+		'v' => 1,
+		'key' => $keyParts,
+		'month' => $month['key'],
+	]));
+}
+
+/**
+ * How long to trust one month's counts, by how long ago that month ended.
+ *
+ * @param array $month One month bucket.
+ * @return int Seconds.
+ */
+function idwiz_timeline_month_cache_ttl($month)
+{
+	$nowMs = time() * 1000;
+
+	// The month the journey is still sending in.
+	if ($month['endMs'] > $nowMs) {
+		return IDWIZ_TIMELINE_CACHE_TTL;
+	}
+
+	$daysSinceEnd = ($nowMs - $month['endMs']) / (DAY_IN_SECONDS * 1000);
+
+	return $daysSinceEnd < IDWIZ_TIMELINE_SETTLING_DAYS
+		? IDWIZ_TIMELINE_SETTLING_TTL
+		: IDWIZ_TIMELINE_SETTLED_TTL;
+}
+
+/**
+ * Fold one slice of a monthly series into the running set.
+ *
+ * Slices partition the window by month, so no two of them carry the same
  * campaign and month.
  *
- * @param array $counts campaignId => monthKey => [metric => count]
- * @param array $chunk  Same shape.
+ * @param array $series campaignId => monthKey => value
+ * @param array $slice  Same shape.
  * @return array
  */
-function idwiz_journey_merge_engagement($counts, $chunk)
+function idwiz_timeline_merge_monthly($series, $slice)
 {
-	foreach ($chunk as $campaignId => $byMonth) {
-		foreach ($byMonth as $monthKey => $values) {
-			$counts[$campaignId][$monthKey] = $values;
+	foreach ($slice as $campaignId => $byMonth) {
+		foreach ($byMonth as $monthKey => $value) {
+			$series[$campaignId][$monthKey] = $value;
 		}
 	}
 
-	return $counts;
+	return $series;
 }
 
 /**
@@ -379,18 +485,46 @@ function idwiz_journey_monthly_engagement_chunk($campaignIds, $months, &$error =
  * Read through get_idwiz_purchases() rather than a hand-rolled query so the
  * user's attribution mode and attribution window still apply.
  *
+ * @param array $campaignIds  Campaign ids, connected campaigns included.
+ * @param array $months       Month buckets.
+ * @param bool  $forceRefresh Ignore the cache and re-read every month.
+ * @return array campaignId => monthKey => ['purchases' => int, 'revenue' => float]
+ */
+function idwiz_journey_monthly_purchases($campaignIds, $months, $forceRefresh = false)
+{
+	if (empty($campaignIds) || empty($months)) {
+		return [];
+	}
+
+	$currentUserId = get_current_user_id();
+
+	return idwiz_timeline_cached_monthly(
+		$months,
+		[
+			'source' => 'purchases',
+			'campaigns' => $campaignIds,
+			// Two users with different attribution settings legitimately see
+			// different revenue for the same month.
+			'attributionMode' => get_user_meta($currentUserId, 'purchase_attribution_mode', true),
+			'attributionLength' => get_user_meta($currentUserId, 'purchase_attribution_length', true),
+		],
+		function ($chunkMonths) use ($campaignIds) {
+			return idwiz_journey_monthly_purchases_chunk($campaignIds, $chunkMonths);
+		},
+		$forceRefresh
+	);
+}
+
+/**
+ * Purchases and attributed revenue for one slice of the window.
+ *
  * @param array $campaignIds Campaign ids, connected campaigns included.
  * @param array $months      Month buckets.
  * @return array campaignId => monthKey => ['purchases' => int, 'revenue' => float]
  */
-function idwiz_journey_monthly_purchases($campaignIds, $months)
+function idwiz_journey_monthly_purchases_chunk($campaignIds, $months)
 {
 	$totals = [];
-
-	if (empty($campaignIds) || empty($months)) {
-		return $totals;
-	}
-
 	$monthKeys = array_flip(array_column($months, 'key'));
 
 	$purchases = get_idwiz_purchases([
@@ -432,18 +566,37 @@ function idwiz_journey_monthly_purchases($campaignIds, $months)
 /**
  * GA-attributed revenue per campaign per month.
  *
+ * @param array $campaignIds  Campaign ids, connected campaigns included.
+ * @param array $months       Month buckets.
+ * @param bool  $forceRefresh Ignore the cache and re-read every month.
+ * @return array campaignId => monthKey => float
+ */
+function idwiz_journey_monthly_ga_revenue($campaignIds, $months, $forceRefresh = false)
+{
+	if (empty($campaignIds) || empty($months)) {
+		return [];
+	}
+
+	return idwiz_timeline_cached_monthly(
+		$months,
+		['source' => 'gaRevenue', 'campaigns' => $campaignIds],
+		function ($chunkMonths) use ($campaignIds) {
+			return idwiz_journey_monthly_ga_revenue_chunk($campaignIds, $chunkMonths);
+		},
+		$forceRefresh
+	);
+}
+
+/**
+ * GA-attributed revenue for one slice of the window.
+ *
  * @param array $campaignIds Campaign ids, connected campaigns included.
  * @param array $months      Month buckets.
  * @return array campaignId => monthKey => float
  */
-function idwiz_journey_monthly_ga_revenue($campaignIds, $months)
+function idwiz_journey_monthly_ga_revenue_chunk($campaignIds, $months)
 {
 	$totals = [];
-
-	if (empty($campaignIds) || empty($months)) {
-		return $totals;
-	}
-
 	$monthKeys = array_flip(array_column($months, 'key'));
 
 	$gaRows = get_idwiz_ga_data([
@@ -660,8 +813,8 @@ function get_idwiz_journey_timeline($journeyId, $forceRefresh = false, &$error =
 		return false;
 	}
 
-	$purchases = idwiz_journey_monthly_purchases($ids['allIds'], $months);
-	$gaRevenue = idwiz_journey_monthly_ga_revenue($ids['allIds'], $months);
+	$purchases = idwiz_journey_monthly_purchases($ids['allIds'], $months, $forceRefresh);
+	$gaRevenue = idwiz_journey_monthly_ga_revenue($ids['allIds'], $months, $forceRefresh);
 
 	// Fold every source, including connected campaigns, onto the parent campaign.
 	$byCampaign = [];
