@@ -32,6 +32,9 @@ function idemailwiz_template_chooser($template)
 
     // Custom post type and taxonomy templates
     if (is_singular('idemailwiz_template')) {
+        if (is_wiz_sms_template(get_queried_object_id())) {
+            return $plugin_dir . 'builder-v2/single-idemailwiz_template-sms.php';
+        }
         return $plugin_dir . 'builder-v2/single-idemailwiz_template-v2.php';
     }
     $post_type_templates = [

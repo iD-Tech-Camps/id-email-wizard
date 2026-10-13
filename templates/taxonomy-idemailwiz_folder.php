@@ -200,7 +200,11 @@ $search_home_url      = $is_search_view ? home_url('/templates/all/') : ( is_obj
 								<input type="checkbox" class="row-select" data-type="template" data-objectid="<?php echo get_the_ID(); ?>" aria-label="Select template <?php echo esc_attr($post_title); ?>" />
 							</td>
 							<td class="col-name">
-								<i class="row-icon fa-regular fa-file"></i>
+								<?php if (($wizTemplateData['template_type'] ?? 'email') === 'sms') { ?>
+									<i class="row-icon fa-solid fa-comment-sms" title="SMS template"></i>
+								<?php } else { ?>
+									<i class="row-icon fa-regular fa-file"></i>
+								<?php } ?>
 								<?php if (!$is_trash_view) { ?>
 									<a class="row-name-link" href="<?php echo esc_url($post_link); ?>"><?php echo esc_html($post_title); ?></a>
 									<?php echo $iterableStatus; ?>

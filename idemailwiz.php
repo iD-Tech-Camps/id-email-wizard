@@ -97,6 +97,7 @@ $files = [
     'builder-v2/chunks.php',
     'builder-v2/chunk-helpers.php',
     'builder-v2/wysiwyg-utils.php',
+    'builder-v2/sms-template.php',
     'includes/folders/folders.php',
     'includes/iterable-functions.php',
     'includes/google-sheets-api.php'
@@ -258,6 +259,7 @@ function idemailwiz_enqueue_assets()
         'user-favorites' => array('/js/user-favorites.js', array('jquery', 'id-general')),
         'bulk-actions' => array('/js/folders/bulk-actions.js', array('jquery', 'id-general', 'folder-actions', 'template-actions')),
         'iterable-actions' => array('/js/iterable-actions.js', array('jquery', 'id-general', 'bulk-actions', 'template-editor')),
+        'sms-template' => array('/js/sms-template.js', array('jquery', 'id-general', 'tiny-mce-editor', 'utilities', 'iterable-actions')),
         'data-tables' => array('/js/data-tables.js', array('jquery', 'id-general')),
         'global-campaign-search' => array('/js/global-campaign-search.js', array('jquery', 'id-general', 'data-tables')),
         'wiz-charts' => array('/js/wiz-charts.js', array('jquery', 'id-general', 'charts-js')),

@@ -254,8 +254,33 @@ function update_iterable_sync_history()
 		$templateData['template_options']['template_settings']['iterable-sync'] = [];
 	}
 
-	$iterableSync = &$templateData['template_options']['template_settings']['iterable-sync'];
+	add_to_iterable_sync_history($templateData['template_options']['template_settings']['iterable-sync'], $synced_template_ids);
 
+	// Save back to database
+	$wpdb->update(
+		$table_name,
+		array('template_data' => json_encode($templateData)),
+		array('post_id' => $post_id),
+		array('%s'),
+		array('%d')
+	);
+
+	wp_send_json(array(
+		'status' => 'success',
+		'message' => 'Sync history updated',
+		'syncHistory' => $templateData['template_options']['template_settings']['iterable-sync']['synced_templates_history'],
+		'primaryTemplateId' => $templateData['template_options']['template_settings']['iterable-sync']['iterable_template_id'] ?? ''
+	));
+}
+add_action('wp_ajax_update_iterable_sync_history', 'update_iterable_sync_history');
+
+/**
+ * Record a sync to these Iterable template IDs in a template's iterable-sync settings.
+ * New IDs are added to the history (the first one becomes primary if there's no primary yet);
+ * IDs already in the history get a fresh timestamp.
+ */
+function add_to_iterable_sync_history(array &$iterableSync, array $synced_template_ids)
+{
 	// Get current history or initialize empty array
 	$syncHistory = $iterableSync['synced_templates_history'] ?? [];
 	$currentPrimaryId = $iterableSync['iterable_template_id'] ?? '';
@@ -296,24 +321,7 @@ function update_iterable_sync_history()
 
 	// Update the history
 	$iterableSync['synced_templates_history'] = $syncHistory;
-
-	// Save back to database
-	$wpdb->update(
-		$table_name,
-		array('template_data' => json_encode($templateData)),
-		array('post_id' => $post_id),
-		array('%s'),
-		array('%d')
-	);
-
-	wp_send_json(array(
-		'status' => 'success',
-		'message' => 'Sync history updated',
-		'syncHistory' => $syncHistory,
-		'primaryTemplateId' => $currentPrimaryId
-	));
 }
-add_action('wp_ajax_update_iterable_sync_history', 'update_iterable_sync_history');
 
 
 /**

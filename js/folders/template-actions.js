@@ -289,6 +289,10 @@ function showCreateTemplateModal() {
 		input: "text",
 		inputLabel: "Enter a template title",
 		inputPlaceholder: "e.g., 0555 | Formers | Camp is awesome!",
+		html: `<div class="new-template-type">
+				<label><input type="radio" name="new_template_type" value="email" checked> <i class="fa-regular fa-envelope"></i> Email</label>
+				<label><input type="radio" name="new_template_type" value="sms"> <i class="fa-solid fa-comment-sms"></i> SMS</label>
+			</div>`,
 		icon: "info",
 		confirmButtonText: "Create Template",
 		showCancelButton: true,
@@ -298,20 +302,21 @@ function showCreateTemplateModal() {
 				Swal.showValidationMessage("Please enter a title for the new template.");
 				return false;
 			}
-			return templateTitle.trim();
+			const templateType = document.querySelector('input[name="new_template_type"]:checked').value;
+			return { title: templateTitle.trim(), type: templateType };
 		},
 	}).then((result) => {
 		if (result.isConfirmed && result.value) {
-			createTemplate(result.value);
+			createTemplate(result.value.title, result.value.type);
 		}
 	});
 }
 
-function createTemplate(templateTitle) {
+function createTemplate(templateTitle, templateType = "email") {
 	idemailwiz_do_ajax(
 		"create_new_wiz_template",
 		idAjax_template_actions.nonce,
-		{ template_title: templateTitle },
+		{ template_title: templateTitle, template_type: templateType },
 		function (response) {
 			if (response.success && response.data.newURL) {
 				window.location.href = response.data.newURL;

@@ -224,6 +224,7 @@ function create_new_wiz_template() {
 		die();
 	}
 	$template_title = sanitize_text_field( $_POST['template_title'] );
+	$template_type  = ( $_POST['template_type'] ?? '' ) === 'sms' ? 'sms' : 'email';
 
 	$post_data = array(
 		'post_title'  => $template_title,
@@ -245,7 +246,7 @@ function create_new_wiz_template() {
 		wp_set_post_terms( $post_id, array( $folderRootTerm ), 'idemailwiz_folder' );
 	}
 
-	$createDBrow = create_wiz_template_db_row( $post_id );
+	$createDBrow = create_wiz_template_db_row( $post_id, $template_type );
 
 	if ( $post_id && $createDBrow ) {
 		$new_url = get_permalink( $post_id );
@@ -259,15 +260,22 @@ function create_new_wiz_template() {
 /**
  * Create the matching row in wp_wiz_templates for a freshly-created template.
  */
-function create_wiz_template_db_row( $post_id ) {
+function create_wiz_template_db_row( $post_id, $template_type = 'email' ) {
 	global $wpdb;
+
+	$template_data = array( 'template_options' => array() );
+	if ( $template_type === 'sms' ) {
+		$template_data['template_type'] = 'sms';
+		$template_data['sms']           = array( 'message' => '', 'image_url' => '' );
+	}
+
 	$success = $wpdb->insert(
 		$wpdb->prefix . 'wiz_templates',
 		array(
 			'last_updated'  => current_time( 'mysql' ),
 			'post_id'       => $post_id,
 			'user_id'       => get_current_user_id(),
-			'template_data' => json_encode( array( 'template_options' => array() ) ),
+			'template_data' => json_encode( $template_data ),
 		),
 		array( '%s', '%d', '%d', '%s' )
 	);
@@ -331,7 +339,6 @@ function duplicate_wiz_template( $post_id, $returnPHP = false ) {
 		// itself against the source's Iterable template id.
 		unset( $templateData['template_options']['template_settings']['iterable-sync']['iterable_template_id'] );
 		unset( $templateData['template_options']['template_settings']['iterable-sync']['synced_templates_history'] );
-
 		$wizTemplateRow['template_data'] = json_encode( $templateData );
 		$wizTemplateRow['post_id']       = $dupedID;
 		unset( $wizTemplateRow['id'] );

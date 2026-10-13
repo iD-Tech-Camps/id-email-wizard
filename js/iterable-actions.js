@@ -772,6 +772,9 @@ jQuery(document).ready(function ($) {
 		}
 	}
 
+	// The SMS editor (sms-template.js) shares the sync history list
+	window.updateSyncHistoryUI = updateSyncHistoryUI;
+
 
 	// Function to handle success of template sync
 	function handleTemplateUpdateSuccess(templateId) {

@@ -39,7 +39,8 @@ function get_folder_list( $current_folder_id = null ) {
 			$template = get_post( $fav_template_id );
 			if ( $template && ! is_wp_error( $template ) ) {
 				$fav_template_title = get_the_title( $fav_template_id );
-				$faves_list        .= '<li class="favItem"><i class="row-icon fa-solid fa-file"></i><a href="' . get_the_permalink( $fav_template_id ) . '" title="' . esc_attr( $fav_template_title ) . '">' . esc_html( $fav_template_title ) . '</a><i title="Remove Favorite" class="fa-solid fa-circle-minus addRemoveFavorite" data-objecttype="Template" data-objectid="' . $fav_template_id . '"></i></li>';
+				$fav_template_icon  = is_wiz_sms_template( $fav_template_id ) ? 'fa-comment-sms' : 'fa-file';
+				$faves_list        .= '<li class="favItem"><i class="row-icon fa-solid ' . $fav_template_icon . '"></i><a href="' . get_the_permalink( $fav_template_id ) . '" title="' . esc_attr( $fav_template_title ) . '">' . esc_html( $fav_template_title ) . '</a><i title="Remove Favorite" class="fa-solid fa-circle-minus addRemoveFavorite" data-objecttype="Template" data-objectid="' . $fav_template_id . '"></i></li>';
 			}
 		}
 		$faves_list .= '</ul>';
