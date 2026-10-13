@@ -7042,6 +7042,7 @@ color: #eee;
 
 #templateUI.sms-template-ui {
 	flex-wrap: nowrap;
+	justify-content: center;
 	align-items: flex-start;
 	padding-bottom: 20px;
 }
@@ -7131,6 +7132,7 @@ color: #eee;
 @media (max-width: 1000px) {
 	#templateUI.sms-template-ui {
 		flex-wrap: wrap;
+		justify-content: flex-start;
 	}
 }
 
