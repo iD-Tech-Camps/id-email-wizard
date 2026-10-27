@@ -121,10 +121,10 @@ function push_sms_to_iterable_template($postId, $iterableTemplateId, $message, $
 		return "Already synced from <a href='" . esc_url(get_permalink($otherPostId)) . "'>" . esc_html(get_the_title($otherPostId)) . '</a>.';
 	}
 
-	// Same guard as email: don't overwrite the template of a campaign that has already sent.
+	// Same guard as email: don't overwrite the template of a blast that has already sent.
 	$itTemplate = get_idwiz_template($iterableTemplateId);
 	$itCampaign = !empty($itTemplate['campaignId']) ? get_idwiz_campaign($itTemplate['campaignId']) : false;
-	if ($itCampaign && $itCampaign['campaignState'] === 'Finished') {
+	if ($itCampaign && $itCampaign['type'] === 'Blast' && $itCampaign['campaignState'] === 'Finished') {
 		return "Its campaign has already sent, so the template can't be updated.";
 	}
 

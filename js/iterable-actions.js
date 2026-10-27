@@ -466,7 +466,7 @@ jQuery(document).ready(function ($) {
 		}).then((result) => {
 			if (result.isConfirmed && result.value) {
 				// Process syncs sequentially with the collected IDs
-				processSyncs(data.fields, result.value, data.alreadySent);
+				processSyncs(data.fields, result.value);
 			} else {
 				toggleOverlay(false);
 			}
@@ -474,7 +474,7 @@ jQuery(document).ready(function ($) {
 	}
 	
 	// Process multiple syncs sequentially
-	async function processSyncs(templateData, templateIds, alreadySent) {
+	async function processSyncs(templateData, templateIds) {
 		const successfulSyncs = [];
 		const failedSyncs = [];
 		const totalSyncs = templateIds.length;
@@ -488,7 +488,7 @@ jQuery(document).ready(function ($) {
 			const displayId = templateId === 'new' ? 'new template' : templateId;
 			
 			try {
-				// Check for duplicates first (skip for 'new')
+				// Check for duplicates and sent blasts first (skip for 'new')
 				if (templateId !== 'new') {
 					updateOverlayMessage(`Syncing (${currentSync}/${totalSyncs}): Checking template ${displayId}...`);
 					const dupCheck = await $.post(idAjax.ajaxurl, {
@@ -512,9 +512,8 @@ jQuery(document).ready(function ($) {
 				const passedId = isNewTemplate ? null : templateId;
 				
 				const syncedId = await create_or_update_iterable_template(
-					templateData, 
-					passedId, 
-					alreadySent,
+					templateData,
+					passedId,
 					isNewTemplate // Always use unique clientTemplateId when creating new
 				);
 				successfulSyncs.push(syncedId);
@@ -960,15 +959,9 @@ jQuery(document).ready(function ($) {
 
 	// Function to create or update Iterable template
 	// useUniqueClientId: when true, appends timestamp to clientTemplateId to force Iterable to create a new template
-	function create_or_update_iterable_template(templateData, existingTemplateId = null, alreadySent = false, useUniqueClientId = false) {
-		
-		return new Promise((resolve, reject) => {
-			// Check early if we're trying to update an already sent template and bail if so
-			if (existingTemplateId && alreadySent === true) {
-				reject("You cannot update an Iterable template attached to an already sent campaign!");
-				return;
-			}
+	function create_or_update_iterable_template(templateData, existingTemplateId = null, useUniqueClientId = false) {
 
+		return new Promise((resolve, reject) => {
 		const {
 			postId,
 			createdBy,

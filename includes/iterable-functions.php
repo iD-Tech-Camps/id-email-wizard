@@ -84,7 +84,6 @@ function idemailwiz_get_template_data_for_iterable()
 		}
 	}
 
-	$response['alreadySent'] = false;
 	if (empty($missing)) {
 		$templateFields = array_merge($reqTemplateFields, $templateFields);
 		$response = array(
@@ -100,22 +99,10 @@ function idemailwiz_get_template_data_for_iterable()
 		
 		$response['syncHistory'] = $syncHistory;
 		$response['primaryTemplateId'] = $templateId;
-
-		if ($templateId) {
-			// Get wiz campaign based on templateId
-			$wizTemplate = get_idwiz_template($templateId);
-			if ($wizTemplate) {
-				$wizCampaign = get_idwiz_campaign($wizTemplate['campaignId']);
-				if ($wizCampaign && $wizCampaign['campaignState'] === 'Finished') {
-					$response['alreadySent'] = true;
-				}
-			}
-		}
 	} else {
 		$response = array(
 			'status' => 'error',
 			'message' => 'Required fields are missing: ' . implode(',', $missing),
-			'alreadySent' => false
 		);
 	}
 
@@ -133,6 +120,17 @@ function check_duplicate_itTemplateId()
 	$post_id = $_POST['post_id'] ?? false;
 
 	if ($post_id) {
+		// Don't overwrite the template of a sent blast; triggered/journey campaigns keep sending, so their templates stay editable
+		$itTemplate = get_idwiz_template($templateId);
+		$itCampaign = !empty($itTemplate['campaignId']) ? get_idwiz_campaign($itTemplate['campaignId']) : false;
+		if ($itCampaign && $itCampaign['type'] === 'Blast' && $itCampaign['campaignState'] === 'Finished') {
+			wp_send_json(array(
+				'status' => 'error',
+				'message' => 'You cannot update an Iterable template attached to an already sent campaign!'
+			));
+			return;
+		}
+
 		// Fetch all wizTemplate posts
 		$args = array(
 			'post_type' => 'idemailwiz_template',
