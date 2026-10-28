@@ -122,10 +122,9 @@ function push_sms_to_iterable_template($postId, $iterableTemplateId, $message, $
 	}
 
 	// Same guard as email: don't overwrite the template of a blast that has already sent.
-	$itTemplate = get_idwiz_template($iterableTemplateId);
-	$itCampaign = !empty($itTemplate['campaignId']) ? get_idwiz_campaign($itTemplate['campaignId']) : false;
-	if ($itCampaign && $itCampaign['type'] === 'Blast' && $itCampaign['campaignState'] === 'Finished') {
-		return "Its campaign has already sent, so the template can't be updated.";
+	$blocked = wiz_template_update_blocked_reason($iterableTemplateId);
+	if ($blocked) {
+		return $blocked;
 	}
 
 	// Check the live template: it must exist, be SMS, and already have this template's message type.
@@ -226,15 +225,6 @@ function sync_wiz_sms_template()
 		$results[] = ['templateId' => $templateId, 'error' => $error];
 		if ($error === null) {
 			$synced[] = $templateId;
-
-			// Keep the local copy of Iterable's template in step, as update_template_after_sync does for email.
-			$wpdb->update(
-				$wpdb->prefix . 'idemailwiz_templates',
-				['clientTemplateId' => $postId, 'message' => $message],
-				['templateId' => $templateId],
-				['%d', '%s'],
-				['%d']
-			);
 		}
 	}
 

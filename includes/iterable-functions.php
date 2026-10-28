@@ -1,6 +1,68 @@
 <?php
 
+/**
+ * Iterable campaigns by template ID, from one call to Iterable's campaign list, reused for up to $maxAge seconds.
+ * Each entry: [['id' => …, 'type' => 'Blast'|'Triggered', 'campaignState' => …], …]. Returns null when Iterable
+ * can't be reached. The builder uses it for the "Sent" badge and to refuse overwriting a sent blast's template.
+ */
+function wiz_iterable_campaigns_by_template($maxAge = 10 * MINUTE_IN_SECONDS)
+{
+	$cacheKey = 'wiz_iterable_campaigns_by_template';
+	$cached = get_transient($cacheKey);
+	if (is_array($cached) && isset($cached['at'], $cached['byTemplate']) && time() - $cached['at'] <= $maxAge) {
+		return $cached['byTemplate'];
+	}
 
+	$apiKey = get_option('idemailwiz_settings')['iterable_api_key'] ?? '';
+	if (!$apiKey) {
+		return null;
+	}
+	$response = wp_remote_get('https://api.iterable.com/api/campaigns', [
+		'headers' => ['Api-Key' => $apiKey],
+		'timeout' => 30,
+	]);
+	if (is_wp_error($response) || wp_remote_retrieve_response_code($response) >= 400) {
+		return null;
+	}
+	$campaigns = json_decode(wp_remote_retrieve_body($response), true)['campaigns'] ?? null;
+	if (!is_array($campaigns)) {
+		return null;
+	}
+
+	$byTemplate = [];
+	foreach ($campaigns as $campaign) {
+		if (empty($campaign['templateId'])) {
+			continue;
+		}
+		$byTemplate[(int) $campaign['templateId']][] = [
+			'id'            => (int) $campaign['id'],
+			'type'          => $campaign['type'] ?? '',
+			'campaignState' => $campaign['campaignState'] ?? '',
+		];
+	}
+	set_transient($cacheKey, ['at' => time(), 'byTemplate' => $byTemplate], HOUR_IN_SECONDS);
+	return $byTemplate;
+}
+
+/**
+ * Why an Iterable template can't be overwritten, or null when it can. A blast that has already sent keeps the
+ * template it was sent with; triggered/journey campaigns keep sending, so their templates stay editable.
+ * Checks Iterable live, and refuses when Iterable can't be reached.
+ */
+function wiz_template_update_blocked_reason($iterableTemplateId)
+{
+	// Near-live: a sync to several templates checks them all against one fetch.
+	$byTemplate = wiz_iterable_campaigns_by_template(60);
+	if ($byTemplate === null) {
+		return "Couldn't check with Iterable whether this template's campaign has already sent. Try again in a minute.";
+	}
+	foreach ($byTemplate[(int) $iterableTemplateId] ?? [] as $campaign) {
+		if ($campaign['type'] === 'Blast' && $campaign['campaignState'] === 'Finished') {
+			return "Its campaign has already sent, so the template can't be updated.";
+		}
+	}
+	return null;
+}
 
 //Get all the postdata needed to create or update a template in Iterable
 function idemailwiz_get_template_data_for_iterable()
@@ -120,13 +182,12 @@ function check_duplicate_itTemplateId()
 	$post_id = $_POST['post_id'] ?? false;
 
 	if ($post_id) {
-		// Don't overwrite the template of a sent blast; triggered/journey campaigns keep sending, so their templates stay editable
-		$itTemplate = get_idwiz_template($templateId);
-		$itCampaign = !empty($itTemplate['campaignId']) ? get_idwiz_campaign($itTemplate['campaignId']) : false;
-		if ($itCampaign && $itCampaign['type'] === 'Blast' && $itCampaign['campaignState'] === 'Finished') {
+		// Don't overwrite the template of a sent blast (checked live in Iterable)
+		$blocked = $templateId && $templateId !== 'new' ? wiz_template_update_blocked_reason($templateId) : null;
+		if ($blocked) {
 			wp_send_json(array(
 				'status' => 'error',
-				'message' => 'You cannot update an Iterable template attached to an already sent campaign!'
+				'message' => $blocked
 			));
 			return;
 		}
@@ -174,37 +235,15 @@ add_action('wp_ajax_check_duplicate_itTemplateId', 'check_duplicate_itTemplateId
 
 
 
+// Called by the email sync after a push. The Wizard used to keep a copy of Iterable's templates for its
+// analytics; that moved to the Email Analyzer app, so there's nothing left to update here.
 function update_template_after_sync()
 {
-	global $wpdb;
-
-	//check nonce
 	check_ajax_referer('iterable-actions', 'security');
-
-
-	$template_id = $_POST['template_id'];
-	$post_id = $_POST['post_id'] ?? null;
-
-	$wizTemplate = get_idwiz_template($template_id);
-
-	$template_name = $_POST['template_name'] ?? $wizTemplate['name'];
-
-
-
-	// Update the custom database table
-	$wpdb->update(
-		$wpdb->prefix . 'idemailwiz_templates',
-		array('clientTemplateId' => $post_id, 'name' => $template_name),
-		array('templateId' => $template_id),
-		array('%d', '%s'),
-		array('%d')
-	);
-
-	$response = array(
+	wp_send_json(array(
 		'status' => 'success',
 		'message' => 'WizTemplate updated!',
-	);
-	wp_send_json($response);
+	));
 }
 add_action('wp_ajax_update_template_after_sync', 'update_template_after_sync');
 

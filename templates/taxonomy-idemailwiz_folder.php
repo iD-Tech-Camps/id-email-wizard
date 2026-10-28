@@ -178,22 +178,16 @@ $search_home_url      = $is_search_view ? home_url('/templates/all/') : ( is_obj
 						$syncHistory      = $iterableSync['synced_templates_history'] ?? array();
 						$syncCount        = is_array($syncHistory) ? count($syncHistory) : 0;
 
-						$templateCampaign = $itTemplateId ? get_idwiz_campaigns(array('templateId' => (int) $itTemplateId)) : false;
-						if (!$templateCampaign && !empty($syncHistory)) {
-							// Fall back to any synced id that matches a campaign
-							foreach ($syncHistory as $entry) {
-								$entryId = isset($entry['template_id']) ? (int) $entry['template_id'] : 0;
-								if (!$entryId || $entryId === (int) $itTemplateId) {
-									continue;
-								}
-								$maybe = get_idwiz_campaigns(array('templateId' => $entryId));
-								if (!empty($maybe)) {
-									$templateCampaign = $maybe;
-									break;
-								}
+						// "Sent" = a campaign in Iterable uses this template (or one it was synced to before).
+						$campaignsByTemplate = wiz_iterable_campaigns_by_template() ?? array();
+						$templateCampaign = null;
+						foreach (array_merge(array($itTemplateId), array_column(is_array($syncHistory) ? $syncHistory : array(), 'template_id')) as $entryId) {
+							if ((int) $entryId && !empty($campaignsByTemplate[(int) $entryId])) {
+								$templateCampaign = $campaignsByTemplate[(int) $entryId][0];
+								break;
 							}
 						}
-						$iterableStatus   = $templateCampaign ? '<a class="sentIndicator" href="https://app.iterable.com/campaigns/' . $templateCampaign[0]['id'] . '?view=Summary"> <i class="fa-regular fa-circle-check"></i> Sent</a>' : null;
+						$iterableStatus   = $templateCampaign ? '<a class="sentIndicator" href="https://app.iterable.com/campaigns/' . $templateCampaign['id'] . '?view=Summary"> <i class="fa-regular fa-circle-check"></i> Sent</a>' : null;
 					?>
 						<tr id="template-<?php echo get_the_ID(); ?>" class="<?php echo esc_attr($rowClasses); ?>" data-foldertitle="<?php echo esc_attr(get_the_title()); ?>" data-objectid="<?php echo get_the_ID(); ?>" data-type="template">
 							<td class="col-select">

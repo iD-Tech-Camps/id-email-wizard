@@ -22,6 +22,11 @@ function idwiz_process_custom_request()
         wp_send_json_error('Invalid request method');
     }
 
+    // Only signed-in users (like admin-ajax.php's wp_ajax_* actions)
+    if (!is_user_logged_in()) {
+        wp_send_json_error('Not signed in', 401);
+    }
+
     // Verify nonce for security
     // if (!isset($_POST['security']) || !wp_verify_nonce($_POST['security'], 'wizAjaxNonce')) {
     //     wp_send_json_error('Security check failed');

@@ -1,1 +1,0 @@
-Select a report to view from the left panel

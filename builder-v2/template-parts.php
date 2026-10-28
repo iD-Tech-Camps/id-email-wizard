@@ -363,7 +363,7 @@ function generate_column_end($rowIndex, $colSetIndex, $columnIndex, $isEditor = 
 function idwiz_get_chunk_template($templateId, $rowIndex, $columnSetIndex, $columnIndex, $chunkIndex, $templateData = null, $isEditor = false)
 {
     if (!$templateData) {
-        $templateData = get_idwiz_template($templateId);
+        $templateData = get_wiztemplate($templateId);
     }
 
     $chunk = $templateData['rows'][$rowIndex]['columnSets'][$columnSetIndex]['columns'][$columnIndex]['chunks'][$chunkIndex] ?? null;
