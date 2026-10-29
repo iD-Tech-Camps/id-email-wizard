@@ -80,6 +80,7 @@ $files = [
     'includes/folders/folders.php',
     'includes/iterable-functions.php',
     'includes/retired-analytics.php',
+    'includes/analyzer-export.php',
 ];
 
 foreach ($files as $file) {
