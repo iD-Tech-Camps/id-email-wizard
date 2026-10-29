@@ -10,9 +10,11 @@ if (!defined('ABSPATH')) {
  * (its scripts/builder/unpack-export.ts reads it). Admins only. Each template is rendered in its own request
  * (the renderer's CSS file is require_once'd, so it only prints once per request).
  */
+// Priority 20: after wiz-options.php adds the Wiz Settings menu (it's loaded after this file). A submenu added
+// before its parent gets a broken link and a "not allowed" page.
 add_action('admin_menu', function () {
     add_submenu_page('idemailwiz_settings', 'Export for Analyzer', 'Export for Analyzer', 'manage_options', 'idemailwiz_analyzer_export', 'idemailwiz_analyzer_export_page');
-});
+}, 20);
 
 function idemailwiz_analyzer_export_check()
 {
